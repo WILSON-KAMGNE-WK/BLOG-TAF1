@@ -1,30 +1,39 @@
 // ==========================================
 // 1. CHARGEMENT DES MODULES (IMPORTS)
 // ==========================================
+require('dotenv').config();
+
 const express = require('express');
 const mysql = require('mysql2');
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
 
 const app = express();
-app.use(express.json()); 
+app.use(express.json());
 
 // ==========================================
-// 2. CONNEXION À MYSQL
+// 2. VARIABLES DYNAMIQUES
+// ==========================================
+const PORT = process.env.PORT || 3000;
+const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+
+// ==========================================
+// 3. CONNEXION À MYSQL (DYNAMIQUE)
 // ==========================================
 const db = mysql.createPool({
-    host: 'localhost',
-    user: 'wilson', 
-    password: 'ton_mot_de_passe',
-    database: 'blog_db'
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'blog_db',
+    port: process.env.DB_PORT || 3306
 }).promise();
 
 db.getConnection()
-    .then(() => console.log("✅ Connecté à la base de données MySQL (blog_db)"))
-    .catch(err => console.error("❌ Erreur de connexion MySQL:", err));
+    .then(() => console.log("✅ Connecté à MySQL"))
+    .catch(err => console.error("❌ Erreur MySQL:", err));
 
 // ==========================================
-// 3. CONFIGURATION SWAGGER
+// 4. CONFIGURATION SWAGGER (DYNAMIQUE)
 // ==========================================
 const swaggerOptions = {
     definition: {
@@ -32,392 +41,181 @@ const swaggerOptions = {
         info: {
             title: 'Blog API Wilson',
             version: '1.0.0',
-            description: 'API Backend pour la gestion d’articles de blog (TP)'
+            description: 'API Backend pour la gestion d’articles de blog'
         },
-        servers: [{ url: 'http://localhost:3000' }]
+        servers: [{ url: BASE_URL }]
     },
-    apis: ['./app.js'], 
+    apis: ['./app.js'],
 };
 
 const specs = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
 // ==========================================
-// 3b. ROUTE RACINE REDIRECTION SWAGGER
+// 5. ROUTE RACINE
 // ==========================================
 app.get('/', (req, res) => {
-    res.redirect('/api-docs'); // Redirige vers la doc Swagger
+    res.redirect('/api-docs');
 });
 
 // ==========================================
-// 4. ROUTES (FONCTIONNALITÉS)
+// 6. ROUTES API
 // ==========================================
 
-/**
- * @openapi
- * /api/articles:
- *   post:
- *     summary: Créer un nouvel article
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - titre
- *               - contenu
- *               - auteur
- *             properties:
- *               titre:
- *                 type: string
- *               contenu:
- *                 type: string
- *               auteur:
- *                 type: string
- *               categorie:
- *                 type: string
- *               tags:
- *                 type: string
- *     responses:
- *       201:
- *         description: Article créé avec succès
- *       400:
- *         description: Données invalides
- *       500:
- *         description: Erreur serveur
- */
+// CREATE
 app.post('/api/articles', async (req, res) => {
     const { titre, contenu, auteur, categorie, tags } = req.body;
+
     if (!titre || !auteur || !contenu) {
-        return res.status(400).json({ 
-            error: "Bad Request", 
-            message: "Le titre, l'auteur et le contenu sont obligatoires." 
+        return res.status(400).json({
+            error: "Bad Request",
+            message: "Le titre, l'auteur et le contenu sont obligatoires."
         });
     }
+
     try {
-        const query = 'INSERT INTO articles (titre, contenu, auteur, categorie, tags) VALUES (?, ?, ?, ?, ?)';
+        const query = `
+            INSERT INTO articles (titre, contenu, auteur, categorie, tags)
+            VALUES (?, ?, ?, ?, ?)
+        `;
         const [result] = await db.query(query, [titre, contenu, auteur, categorie, tags]);
-        res.status(201).json({ message: "Article créé avec succès !", articleId: result.insertId });
+
+        res.status(201).json({
+            message: "Article créé avec succès !",
+            articleId: result.insertId
+        });
+
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: "Internal Server Error", message: err.message });
+        res.status(500).json({ error: err.message });
     }
 });
 
-/**
- * @openapi
- * /api/articles:
- *   get:
- *     summary: Récupérer la liste de tous les articles
- *     responses:
- *       200:
- *         description: Liste des articles récupérée avec succès
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: integer
- *                   titre:
- *                     type: string
- *                   contenu:
- *                     type: string
- *                   auteur:
- *                     type: string
- *                   date_creation:
- *                     type: string
- *                     format: date-time
- *       500:
- *         description: Erreur serveur
- */
+// READ ALL
 app.get('/api/articles', async (req, res) => {
     try {
         const [rows] = await db.query('SELECT * FROM articles ORDER BY date_creation DESC');
         res.json(rows);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Erreur lors de la récupération des articles" });
+        res.status(500).json({ error: "Erreur récupération articles" });
     }
 });
 
-/**
- * @openapi
- * /api/articles/recherche/{motcle}:
- *   get:
- *     summary: Rechercher des articles par mot-clé dans le titre
- *     parameters:
- *       - in: path
- *         name: motcle
- *         required: true
- *         schema:
- *           type: string
- *         description: Mot-clé à rechercher dans le titre
- *     responses:
- *       200:
- *         description: Résultats de la recherche
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *       500:
- *         description: Erreur serveur
- */
+// SEARCH TITLE
 app.get('/api/articles/recherche/:motcle', async (req, res) => {
-    const { motcle } = req.params;
     try {
-        const query = 'SELECT * FROM articles WHERE titre LIKE ? ORDER BY date_creation DESC';
-        const [rows] = await db.query(query, [`%${motcle}%`]);
+        const [rows] = await db.query(
+            'SELECT * FROM articles WHERE titre LIKE ? ORDER BY date_creation DESC',
+            [`%${req.params.motcle}%`]
+        );
         res.json(rows);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Erreur lors de la recherche" });
+        res.status(500).json({ error: "Erreur recherche" });
     }
 });
 
-/**
- * @openapi
- * /api/articles/recherche-global/{motcle}:
- *   get:
- *     summary: Rechercher des articles par mot-clé dans le titre et le contenu
- *     parameters:
- *       - in: path
- *         name: motcle
- *         required: true
- *         schema:
- *           type: string
- *         description: Mot-clé à rechercher
- *     responses:
- *       200:
- *         description: Résultats de la recherche globale
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *       500:
- *         description: Erreur serveur
- */
+// SEARCH GLOBAL
 app.get('/api/articles/recherche-global/:motcle', async (req, res) => {
-    const { motcle } = req.params;
     try {
-        const query = 'SELECT * FROM articles WHERE titre LIKE ? OR contenu LIKE ? ORDER BY date_creation DESC';
-        const [rows] = await db.query(query, [`%${motcle}%`, `%${motcle}%`]);
+        const [rows] = await db.query(
+            'SELECT * FROM articles WHERE titre LIKE ? OR contenu LIKE ? ORDER BY date_creation DESC',
+            [`%${req.params.motcle}%`, `%${req.params.motcle}%`]
+        );
         res.json(rows);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Erreur lors de la recherche globale" });
+        res.status(500).json({ error: "Erreur recherche globale" });
     }
 });
 
-/**
- * @openapi
- * /api/articles/categorie/{nom}:
- *   get:
- *     summary: Récupérer les articles d'une catégorie spécifique
- *     parameters:
- *       - in: path
- *         name: nom
- *         required: true
- *         schema:
- *           type: string
- *         description: Le nom de la catégorie (ex: NEWS, TECH)
- *     responses:
- *       200:
- *         description: Liste des articles de la catégorie
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *       500:
- *         description: Erreur serveur
- */
+// FILTER CATEGORY
 app.get('/api/articles/categorie/:nom', async (req, res) => {
-    const { nom } = req.params;
     try {
-        const query = 'SELECT * FROM articles WHERE categorie = ? ORDER BY date_creation DESC';
-        const [rows] = await db.query(query, [nom]);
+        const [rows] = await db.query(
+            'SELECT * FROM articles WHERE categorie = ? ORDER BY date_creation DESC',
+            [req.params.nom]
+        );
         res.json(rows);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Erreur lors du filtrage par catégorie" });
+        res.status(500).json({ error: "Erreur filtre catégorie" });
     }
 });
 
-/**
- * @openapi
- * /api/articles/date/{annee}/{mois}/{jour}:
- *   get:
- *     summary: Récupérer les articles publiés à une date spécifique
- *     parameters:
- *       - in: path
- *         name: annee
- *         required: true
- *         schema:
- *           type: integer
- *       - in: path
- *         name: mois
- *         required: true
- *         schema:
- *           type: integer
- *       - in: path
- *         name: jour
- *         required: true
- *         schema:
- *           type: integer
- *         description: Date de publication (YYYY/MM/DD)
- *     responses:
- *       200:
- *         description: Liste des articles publiés à cette date
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *       500:
- *         description: Erreur serveur
- */
+// FILTER DATE
 app.get('/api/articles/date/:annee/:mois/:jour', async (req, res) => {
-    const { annee, mois, jour } = req.params;
     try {
+        const { annee, mois, jour } = req.params;
         const date = `${annee}-${mois.padStart(2,'0')}-${jour.padStart(2,'0')}`;
-        const query = 'SELECT * FROM articles WHERE DATE(date_creation) = ? ORDER BY date_creation DESC';
-        const [rows] = await db.query(query, [date]);
+
+        const [rows] = await db.query(
+            'SELECT * FROM articles WHERE DATE(date_creation) = ? ORDER BY date_creation DESC',
+            [date]
+        );
+
         res.json(rows);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Erreur lors du filtrage par date" });
+        res.status(500).json({ error: "Erreur filtre date" });
     }
 });
 
-/**
- * @openapi
- * /api/articles/{id}:
- *   get:
- *     summary: Récupérer un seul article par son ID
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: L'ID de l'article à afficher
- *     responses:
- *       200:
- *         description: Article trouvé
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *       404:
- *         description: Article non trouvé
- *       500:
- *         description: Erreur serveur
- */
+// READ ONE
 app.get('/api/articles/:id', async (req, res) => {
-    const { id } = req.params;
     try {
-        const [rows] = await db.query('SELECT * FROM articles WHERE id = ?', [id]);
-        if (rows.length === 0) return res.status(404).json({ message: "Article non trouvé." });
+        const [rows] = await db.query('SELECT * FROM articles WHERE id = ?', [req.params.id]);
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: "Article non trouvé" });
+        }
+
         res.json(rows[0]);
     } catch (err) {
-        res.status(500).json({ error: "Erreur lors de la récupération de l'article" });
+        res.status(500).json({ error: "Erreur récupération article" });
     }
 });
 
-/**
- * @openapi
- * /api/articles/{id}:
- *   put:
- *     summary: Modifier un article existant
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: L'ID de l'article à modifier
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               titre:
- *                 type: string
- *               contenu:
- *                 type: string
- *               categorie:
- *                 type: string
- *     responses:
- *       200:
- *         description: Article mis à jour avec succès
- *       404:
- *         description: Article non trouvé
- *       500:
- *         description: Erreur serveur
- */
+// UPDATE
 app.put('/api/articles/:id', async (req, res) => {
-    const { id } = req.params;
     const { titre, contenu, categorie } = req.body;
+
     try {
-        const query = 'UPDATE articles SET titre = ?, contenu = ?, categorie = ? WHERE id = ?';
-        const [result] = await db.query(query, [titre, contenu, categorie, id]);
-        if (result.affectedRows === 0) return res.status(404).json({ message: "Article non trouvé." });
-        res.json({ message: "Article mis à jour avec succès !" });
+        const [result] = await db.query(
+            'UPDATE articles SET titre=?, contenu=?, categorie=? WHERE id=?',
+            [titre, contenu, categorie, req.params.id]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: "Article non trouvé" });
+        }
+
+        res.json({ message: "Article mis à jour !" });
+
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Erreur lors de la mise à jour" });
+        res.status(500).json({ error: "Erreur mise à jour" });
     }
 });
 
-/**
- * @openapi
- * /api/articles/{id}:
- *   delete:
- *     summary: Supprimer un article par son ID
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: L'ID de l'article à supprimer
- *     responses:
- *       200:
- *         description: Article supprimé avec succès
- *       404:
- *         description: Article non trouvé
- *       500:
- *         description: Erreur serveur
- */
+// DELETE
 app.delete('/api/articles/:id', async (req, res) => {
-    const { id } = req.params;
     try {
-        const [result] = await db.query('DELETE FROM articles WHERE id = ?', [id]);
-        if (result.affectedRows === 0) return res.status(404).json({ message: "Article non trouvé." });
-        res.json({ message: "Article supprimé avec succès !" });
+        const [result] = await db.query(
+            'DELETE FROM articles WHERE id = ?',
+            [req.params.id]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: "Article non trouvé" });
+        }
+
+        res.json({ message: "Article supprimé !" });
+
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Erreur lors de la suppression de l'article" });
+        res.status(500).json({ error: "Erreur suppression" });
     }
 });
 
 // ==========================================
-// 5. LANCEMENT DU SERVEUR
+// 7. LANCEMENT DU SERVEUR
 // ==========================================
-const PORT = 3000;
 app.listen(PORT, () => {
-    console.log(`\n🚀 Serveur démarré sur : http://localhost:${PORT}`);
-    console.log(`📘 Documentation Swagger : http://localhost:${PORT}/api-docs\n`);
+    console.log(`\n🚀 Serveur démarré sur : ${BASE_URL}`);
+    console.log(`📘 Swagger : ${BASE_URL}/api-docs\n`);
 });
